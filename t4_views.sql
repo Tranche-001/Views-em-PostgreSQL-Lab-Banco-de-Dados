@@ -14,6 +14,11 @@
 CREATE EXTENSION IF NOT EXISTS cube;
 CREATE EXTENSION IF NOT EXISTS earthdistance;
 
+-- Reset para idempotência: restaura o estado original do(s) aeroporto(s)
+-- corrigidos pelo Exercício 5, para que os Exercícios 2 e 4 produzam
+-- resultados corretos em re-execuções do script.
+UPDATE airports SET city_id = NULL WHERE ident = 'BR-0017';
+
 -- ============================================================
 -- EXERCÍCIO 1 – Visão materializada Aeroportos_Brasileiros
 -- ============================================================
@@ -53,7 +58,7 @@ SELECT
     a.latitude_deg,
     a.longitude_deg,
     co.name         AS pais_nome,
-    co.continent    AS continente,
+    co.continent_id    AS continente,
     ci.name         AS cidade_nome,
     ci.population   AS cidade_populacao
 FROM airports a
@@ -95,17 +100,18 @@ REFRESH MATERIALIZED VIEW Aeroportos_Brasileiros;
 -- ============================================================
 -- EXERCÍCIO 2 – Aeroportos_sem_cidades, Cidades_brasileiras
 --               e associação por distância ≤ 10 km
--- ============================================================
-
+-- =============================================================
+CREATE EXTENSION IF NOT EXISTS cube;
+CREATE EXTENSION IF NOT EXISTS earthdistance;
 -- Visão: aeroportos sem cidade vinculada
-DROP VIEW IF EXISTS Aeroportos_sem_cidades;
+DROP VIEW IF EXISTS Aeroportos_sem_cidades CASCADE;
 CREATE VIEW Aeroportos_sem_cidades AS
     SELECT id, name, latitude_deg, longitude_deg
     FROM airports
     WHERE city_id IS NULL;
 
 -- Visão: cidades brasileiras com população ≥ 100 000 habitantes
-DROP VIEW IF EXISTS Cidades_brasileiras;
+DROP VIEW IF EXISTS Cidades_brasileiras CASCADE;
 CREATE VIEW Cidades_brasileiras AS
     SELECT ci.id, ci.name, ci.population, ci.latitude, ci.longitude
     FROM cities ci
@@ -165,7 +171,7 @@ SELECT * FROM Circuitos_completa LIMIT 10;
 -- EXERCÍCIO 4 – Visão Problemas_aeroportos
 -- ============================================================
 
-DROP VIEW IF EXISTS Problemas_aeroportos;
+DROP VIEW IF EXISTS Problemas_aeroportos CASCADE;
 CREATE VIEW Problemas_aeroportos AS
     WITH distancias AS (
         SELECT
@@ -212,6 +218,11 @@ CREATE VIEW Correcao_aeroportos AS
     FROM airports
     WHERE id IN (SELECT DISTINCT id FROM Problemas_aeroportos);
 
+-- Salvar IDs antes do UPDATE (Correcao_aeroportos esvaziará após a correção)
+DROP TABLE IF EXISTS ids_corrigidos;
+CREATE TEMP TABLE ids_corrigidos AS
+    SELECT DISTINCT id FROM Problemas_aeroportos;
+
 -- Identificar, para cada aeroporto, a cidade mais próxima (menor distância)
 -- e atualizar city_id via UPDATE na visão (Correcao_aeroportos é atualizável:
 -- deriva diretamente de airports sem agregações).
@@ -237,15 +248,15 @@ FROM cidade_mais_proxima cmp
 WHERE ca.id = cmp.aeroporto_id
   AND cmp.cidade_id IS NOT NULL;
 
--- Verificar que Aeroportos_sem_cidades e Problemas_aeroportos foram afetados
+-- Verificar que os aeroportos corrigidos não aparecem mais em Aeroportos_sem_cidades
 SELECT COUNT(*) AS aeroportos_sem_cidade_restantes FROM Aeroportos_sem_cidades
-WHERE id IN (SELECT DISTINCT id FROM (
-    SELECT id FROM airports WHERE city_id IS NULL
-) sub);
+WHERE id IN (SELECT id FROM Correcao_aeroportos);
 
 -- Consulta final para confirmar as correções realizadas
-SELECT ca.id, ca.name, ca.city_id, ci.name AS cidade_vinculada
-FROM Correcao_aeroportos ca
-JOIN cities ci ON ci.id = ca.city_id
-ORDER BY ca.name
+-- (usa airports diretamente; Correcao_aeroportos está vazia após a correção)
+SELECT a.id, a.name, a.city_id, ci.name AS cidade_vinculada
+FROM airports a
+JOIN cities ci ON ci.id = a.city_id
+WHERE a.id IN (SELECT id FROM ids_corrigidos)
+ORDER BY a.name
 LIMIT 20;
