@@ -1,0 +1,12 @@
+# PostgreSQL Local Data
+db_data/
+
+# OS metadata
+.DS_Store
+
+# Local/Docker temporary files
+docker-labbd/carga_local.sql
+
+# Local development guide and setup script (personal context)
+GUIA_USO_BANCO.md
+setup_local_postgres.sh
